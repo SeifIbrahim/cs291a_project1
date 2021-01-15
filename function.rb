@@ -8,13 +8,15 @@ def main(event:, context:)
   # You shouldn't need to use context, but its fields are explained here:
   # https://docs.aws.amazon.com/lambda/latest/dg/ruby-context.html
   headers = event['headers'].transform_keys(&:downcase)
-  #puts headers
   if event['path'] == '/token'
     # Handle errors
+    return response(status: 405) unless event['httpMethod'] == 'POST'
     return response(status: 415) if headers['content-type'] != 'application/json'
     begin
-      body = JSON.parse(event['body'])
-    rescue JSON::ParserError
+      unparsed_body = event.fetch('body')
+      return response(status: 422) if unparsed_body.nil?
+      body = JSON.parse(unparsed_body)
+    rescue JSON::ParserError, KeyError
       return response(status: 422)
     end
     # Generate a token
@@ -24,15 +26,19 @@ def main(event:, context:)
       nbf: Time.now.to_i + 2
     }
     token = JWT.encode(payload, ENV['JWT_SECRET'], 'HS256')
-    response(body: { 'token' => token }, status: 200)
+    response(body: { 'token' => token }, status: 201)
   elsif event['path'] == '/'
+    # Handle errors
+    return response(status: 405) unless event['httpMethod'] == 'GET'
     return response(status: 403) unless headers.key?('authorization')
     auth_tokens = headers['authorization'].split
-    return response(status: 403) if auth_tokens[0] != 'Bearer'
+    return response(status: 403) unless auth_tokens[0] == 'Bearer'
     begin
       token = JWT.decode(auth_tokens[1], ENV['JWT_SECRET'])
-    rescue JWT::DecodeError
+    rescue JWT::ImmatureSignature, JWT::ExpiredSignature
       return response(status: 401)
+    rescue JWT::DecodeError
+      return response(status: 403)
     end
     response(body: token[0]['data'], status: 200)
   else
@@ -55,7 +61,7 @@ if $PROGRAM_NAME == __FILE__
 
   # Call /token
   PP.pp main(context: {}, event: {
-               'body' => '{"name": "bboe"}',
+               'body' => nil,
                'headers' => { 'Content-Type' => 'application/json' },
                'httpMethod' => 'POST',
                'path' => '/token'
