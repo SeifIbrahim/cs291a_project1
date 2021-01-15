@@ -1,32 +1,19 @@
 # frozen_string_literal: true
 
-require 'active_support/hash_with_indifferent_access'
 require 'json'
 require 'jwt'
 require 'pp'
 
-# source: https://stackoverflow.com/questions/21715364/rails-case-insensitive-params-hash-keys?noredirect=1&lq=1
-class CaseInsensitiveHash < HashWithIndifferentAccess
-  def [](key)
-    super convert_key(key)
-  end
-
-  protected
-
-  def convert_key(key)
-    key.respond_to?(:downcase) ? key.downcase : key
-  end
-end
-
 def main(event:, context:)
   # You shouldn't need to use context, but its fields are explained here:
   # https://docs.aws.amazon.com/lambda/latest/dg/ruby-context.html
-  ci_event = CaseInsensitiveHash.new(event)
-  if ci_event['path'] == '/token'
+  headers = event['headers'].transform_keys(&:downcase)
+  #puts headers
+  if event['path'] == '/token'
     # Handle errors
-    return response(status: 415) if ci_event['type'] != 'aplication/json'
+    return response(status: 415) if headers['content-type'] != 'application/json'
     begin
-      body = JSON.parse(ci_event['body'])
+      body = JSON.parse(event['body'])
     rescue JSON::ParserError
       return response(status: 422)
     end
@@ -38,15 +25,16 @@ def main(event:, context:)
     }
     token = JWT.encode(payload, ENV['JWT_SECRET'], 'HS256')
     response(body: { 'token' => token }, status: 200)
-  elsif ci_event['path'] == '/'
-    auth_tokens = ci_event['Authorization'].split
+  elsif event['path'] == '/'
+    return response(status: 403) unless headers.key?('authorization')
+    auth_tokens = headers['authorization'].split
     return response(status: 403) if auth_tokens[0] != 'Bearer'
     begin
-      token = JWT.decode(payload, ENV['JWT_SECRET'])
+      token = JWT.decode(auth_tokens[1], ENV['JWT_SECRET'])
     rescue JWT::DecodeError
       return response(status: 401)
     end
-    response(token[:data], status: 200)
+    response(body: token[0]['data'], status: 200)
   else
     response(status: 404)
   end
@@ -76,7 +64,7 @@ if $PROGRAM_NAME == __FILE__
   # Generate a token
   payload = {
     data: { user_id: 128 },
-    exp: Time.now.to_i + 1,
+    exp: Time.now.to_i + 5,
     nbf: Time.now.to_i
   }
   token = JWT.encode payload, ENV['JWT_SECRET'], 'HS256'
