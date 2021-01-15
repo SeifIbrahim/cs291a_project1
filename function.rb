@@ -7,6 +7,21 @@ require 'pp'
 def main(event:, context:)
   # You shouldn't need to use context, but its fields are explained here:
   # https://docs.aws.amazon.com/lambda/latest/dg/ruby-context.html
+  if event['path'] == '/token'
+    # Generate a token
+    payload = {
+      data: event,
+      exp: Time.now.to_i + 5,
+      nbf: Time.now.to_i + 2
+    }
+    response(body: {
+               'body' => '{"token": "bboe"}',
+               'headers' => { 'Content-Type' => 'application/json' },
+               'httpMethod' => 'POST',
+               'path' => '/token'
+      status: 200)
+
+  end
   response(body: event, status: 200)
 end
 
